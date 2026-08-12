@@ -13,6 +13,23 @@ STUN_COOKIE = 0x2112A442
 STUN_HEADER = struct.Struct('!HHI12s')
 
 
+def recv_udp(sock, size=2048):
+    """Return one datagram, or None for transient nonblocking/ICMP errors.
+
+    Windows reports an ICMP Port Unreachable received by an unconnected UDP
+    socket as WSAECONNRESET (10054). Candidate probing expects unreachable
+    endpoints, so that signal must not abort the remaining candidates.
+    """
+    try:
+        return sock.recvfrom(size)
+    except BlockingIOError:
+        return None
+    except ConnectionResetError as exc:
+        if getattr(exc, 'winerror', None) == 10054:
+            return None
+        raise
+
+
 def endpoint_key(endpoint):
     """Normalize IPv4/IPv6 recvfrom tuples for comparison and sample ranking."""
     return endpoint[0], endpoint[1]
@@ -96,8 +113,10 @@ def probe_candidates(sock, candidates, session_id, secret, timeout=10.0, retries
             except OSError: pass
         round_end = min(deadline, time.monotonic() + timeout / max(retries, 1))
         while time.monotonic() < round_end:
-            try: data, endpoint = sock.recvfrom(2048)
-            except BlockingIOError: time.sleep(0.005); continue
+            received = recv_udp(sock)
+            if received is None:
+                time.sleep(0.005); continue
+            data, endpoint = received
             session.receive(data, endpoint)
         if time.monotonic() >= deadline: break
     return session.best_endpoint()

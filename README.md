@@ -14,7 +14,7 @@
 - 手动直连：`python client.py --connect 192.168.1.20:47000`。
 - 原本地模式保持不变：先运行 `python server.py`，再运行两个 `python client.py`。
 
-连接码包含临时 IP/端口，应只发给本局玩家。公网直连仍受运营商 NAT 限制：对称 NAT
+连接码包含临时 IP/端口，应只发给本局玩家。公网房间不会发布回环或 APIPA（169.254.x.x）地址；公网直连仍受运营商 NAT 限制：对称 NAT
 可能无法打洞，当前没有 TURN/VPS 中继保证。失败时允许 Python 通过 Windows 防火墙，确认路由器
 UPnP 已开启，或尝试 IPv6/手动端口映射。真实跨运营商测试和防火墙弹窗需在 Windows 主机手测。
 

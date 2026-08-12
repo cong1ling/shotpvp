@@ -1,6 +1,6 @@
 import socket, time
 from server import GameServer
-from client import ensure_socket_bound
+from client import ensure_socket_bound, wait_for_join_ack
 from protocol import encode_join, decode, MSG_JOIN_ACK
 from connectivity import ProbeSession, probe_candidates
 from connection_code import Candidate, TYPE_LAN
@@ -28,5 +28,24 @@ def test_unbound_client_socket_is_bound_before_use():
     ensure_socket_bound(client)
     assert client.getsockname()[1] != 0
     client.close()
+
+
+class DropFirstJoinSocket:
+    def __init__(self):
+        self.sent = 0
+    def sendto(self, _data, _addr):
+        self.sent += 1
+    def recvfrom(self, _size):
+        if self.sent < 2:
+            raise BlockingIOError
+        from protocol import encode_join_ack
+        return encode_join_ack(1), ('127.0.0.1', 47000)
+
+
+def test_join_retries_after_first_datagram_is_lost():
+    sock = DropFirstJoinSocket()
+    assert wait_for_join_ack(sock, ('127.0.0.1', 47000), timeout=.2,
+                             retry_interval=.01) == 1
+    assert sock.sent >= 2
 
 if __name__=='__main__': test_lifecycle_localhost(); test_authenticated_local_probe_then_game_join(); print('服务端生命周期测试全部通过')

@@ -1,6 +1,17 @@
 import struct
 from connectivity import *
 
+
+class ResettingSocket:
+    def recvfrom(self, _size):
+        error = ConnectionResetError('UDP destination unreachable')
+        error.winerror = 10054
+        raise error
+
+
+def test_windows_udp_reset_is_transient():
+    assert recv_udp(ResettingSocket()) is None
+
 def test_probe_replay_rtt():
     s = ProbeSession(b'a'*16, b'b'*32); packet = s.challenge(1, 100, ('127.0.0.1', 1))
     peer = ProbeSession(b'a'*16, b'b'*32); response = peer.receive(packet, ('x',1), 120)
@@ -45,4 +56,16 @@ def test_candidate_gathering_matches_socket_family():
     finally:
         sock.close()
 
-if __name__=='__main__': test_probe_replay_rtt(); test_probe_replay_and_nonce_are_endpoint_bound(); test_stun_ipv4_fixture(); test_stun_ipv6_and_upnp_xml(); test_candidate_gathering_matches_socket_family(); print('连接探测测试全部通过')
+
+def test_public_room_candidates_exclude_loopback_and_apipa():
+    def resolver(*_args):
+        return [
+            (socket.AF_INET, socket.SOCK_DGRAM, 0, '', ('127.0.0.1', 47000)),
+            (socket.AF_INET, socket.SOCK_DGRAM, 0, '', ('169.254.83.107', 47000)),
+            (socket.AF_INET, socket.SOCK_DGRAM, 0, '', ('192.168.1.8', 47000)),
+        ]
+    assert gather_lan_candidates(47000, diagnostic=False, resolver=resolver) == [
+        Candidate(4, TYPE_LAN, '192.168.1.8', 47000)
+    ]
+
+if __name__=='__main__': test_windows_udp_reset_is_transient(); test_probe_replay_rtt(); test_probe_replay_and_nonce_are_endpoint_bound(); test_stun_ipv4_fixture(); test_stun_ipv6_and_upnp_xml(); test_candidate_gathering_matches_socket_family(); test_public_room_candidates_exclude_loopback_and_apipa(); print('连接探测测试全部通过')

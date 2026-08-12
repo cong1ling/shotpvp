@@ -27,6 +27,7 @@ from renderer import Renderer
 from input_win import (ConsoleInput, map_events, VK_ESCAPE, VK_W, VK_A, VK_S, VK_D,
                        VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT)
 from input_intent import compose_direction
+from connectivity import recv_udp
 
 
 SERVER_HOST = '127.0.0.1'
@@ -77,6 +78,25 @@ def ensure_socket_bound(sock):
     return sock
 
 
+def wait_for_join_ack(sock, server_addr, timeout=5.0, retry_interval=0.5):
+    """Reliably complete JOIN over UDP by retransmitting until acknowledged."""
+    deadline = time.monotonic() + timeout
+    next_send = 0.0
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+        if now >= next_send:
+            sock.sendto(encode_join(), server_addr)
+            next_send = now + retry_interval
+        received = recv_udp(sock)
+        if received is None:
+            time.sleep(0.01)
+            continue
+        msg = decode(received[0])
+        if msg and msg[0] == MSG_JOIN_ACK:
+            return msg[1]['player_id']
+    return None
+
+
 def run_client(server_host=SERVER_HOST, server_port=SERVER_PORT, embedded_server=None, sock=None,
                keepalive=None):
     # 1. 建立 UDP socket
@@ -85,22 +105,12 @@ def run_client(server_host=SERVER_HOST, server_port=SERVER_PORT, embedded_server
     server_addr = (server_host, server_port)
     sock.setblocking(False)
 
-    # 2. 发送 JOIN
-    sock.sendto(encode_join(), server_addr)
+    # 2. JOIN 是关键 UDP 握手，在截止时间内定期重发。
     print('正在连接 %s:%d ...' % server_addr)
     print('按 ESC 退出')
 
     # 3. 等 JOIN_ACK，拿 player_id
-    player_id = None
-    deadline = time.time() + 5.0
-    while player_id is None and time.time() < deadline:
-        try:
-            data, _ = sock.recvfrom(2048)
-            msg = decode(data)
-            if msg and msg[0] == MSG_JOIN_ACK:
-                player_id = msg[1]['player_id']
-        except BlockingIOError:
-            time.sleep(0.01)
+    player_id = wait_for_join_ack(sock, server_addr)
     if player_id is None:
         print('连接失败：未收到服务器响应')
         sys.exit(1)
@@ -132,10 +142,11 @@ def run_client(server_host=SERVER_HOST, server_port=SERVER_PORT, embedded_server
         nonlocal prev_snapshot, curr_snapshot, local_tank, ping_ms, last_state_at
         while running:
             try:
-                data, _ = sock.recvfrom(2048)
-            except BlockingIOError:
-                time.sleep(0.001)
-                continue
+                received = recv_udp(sock)
+                if received is None:
+                    time.sleep(0.001)
+                    continue
+                data, _ = received
             except OSError:
                 break
             msg = decode(data)
@@ -305,7 +316,7 @@ def main():
             host, sep, port = value.strip().rpartition(':')
             if sep: stun_hosts.append((host, int(port)))
         candidates, resources, warnings = gather_candidates(embedded.sock, stun_hosts,
-                                                             enable_upnp=True, diagnostic=True)
+                                                             enable_upnp=True, diagnostic=False)
         for warning in warnings: print('[直连提示]', warning)
         embedded.start()
         record = type(record)(record.kind, record.created_minute, record.session_id, record.secret, tuple(candidates))

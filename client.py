@@ -66,12 +66,22 @@ def reconstruct_bullets(state_bullets):
     return out
 
 
+def ensure_socket_bound(sock):
+    """Bind an unbound UDP socket, including Windows WSAEINVAL behavior."""
+    try:
+        local_port = sock.getsockname()[1]
+    except OSError:
+        local_port = 0
+    if local_port == 0:
+        sock.bind(('::' if sock.family == socket.AF_INET6 else '0.0.0.0', 0))
+    return sock
+
+
 def run_client(server_host=SERVER_HOST, server_port=SERVER_PORT, embedded_server=None, sock=None,
                keepalive=None):
     # 1. 建立 UDP socket
     sock = sock or socket.socket(socket.AF_INET6 if ':' in server_host else socket.AF_INET, socket.SOCK_DGRAM)
-    if sock.getsockname()[1] == 0:
-        sock.bind(('::' if sock.family == socket.AF_INET6 else '0.0.0.0', 0))
+    ensure_socket_bound(sock)
     server_addr = (server_host, server_port)
     sock.setblocking(False)
 

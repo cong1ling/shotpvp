@@ -90,6 +90,11 @@ class ProbeSession:
     def best_endpoint(self, ipv6_tie_ms=2.0):
         ranked = [(statistics.median(v), ep) for ep, v in self.samples.items() if v]
         if not ranked: return None
+        # 回环路径无条件最优先：本机/同机联机场景回环不受防火墙拦截且永远正确；
+        # 跨网场景下回环地址探测不到，不会进入 samples，故无副作用。
+        loopbacks = [(r, ep) for r, ep in ranked if ep[0] in ('127.0.0.1', '::1')]
+        if loopbacks:
+            return min(loopbacks)[1]
         ranked.sort(); best_rtt, best = ranked[0]
         ipv6 = [(r, ep) for r, ep in ranked if ':' in ep[0] and r <= best_rtt + ipv6_tie_ms]
         return min(ipv6)[1] if ipv6 else best
@@ -290,4 +295,11 @@ def gather_candidates(sock, stun_endpoints=(), enable_upnp=False, diagnostic=Fal
             else: warnings.append('UPnP 网关未发现')
         except Exception: warnings.append('UPnP 映射失败，继续使用其他候选')
     unique = {(c.family, c.kind, c.ip, c.port): c for c in candidates}
-    return list(unique.values())[:12], resources, warnings
+    # 方案 A：同机双终端兜底。host 连接码默认不包含回环地址（gather_lan_candidates 排除
+    # loopback），而本机双终端场景下 join-code 端通过物理网卡 IP 探测会被 Windows 防火墙
+    # 拦截入站 UDP。这里把回环地址作为最低优先候选补上，同机一定能连通；跨网场景下该
+    # 候选探测不到，自然被对方忽略，无副作用。
+    candidates = list(unique.values())[:12]
+    if socket_version == 4 and not any(c.ip in ('127.0.0.1', '::1') for c in candidates):
+        candidates.append(Candidate(4, TYPE_LAN, '127.0.0.1', port))
+    return candidates, resources, warnings

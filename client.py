@@ -22,7 +22,7 @@ from protocol import (
     KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_FIRE,
     DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT, DIR_DELTA,
 )
-from game import MAP_W, MAP_H, build_map, Tank, Bullet, PowerUp, is_wall, PHASE_PLAYING
+from game import MAP_W, MAP_H, build_map, Tank, Bullet, PowerUp, is_wall, can_place_tank, PHASE_PLAYING
 from renderer import Renderer
 from input_win import (ConsoleInput, map_events, VK_ESCAPE, VK_W, VK_A, VK_S, VK_D,
                        VK_UP, VK_DOWN, VK_LEFT, VK_RIGHT)
@@ -218,12 +218,20 @@ def run_client(server_host=SERVER_HOST, server_port=SERVER_PORT, embedded_server
                         sock.sendto(encode_input(move_key, True), server_addr)
                     except OSError:
                         pass
-                    if local_tank and local_tank.alive and curr_snapshot and curr_snapshot[4]['phase'] == PHASE_PLAYING:
+                    # 预测守卫：本地坦克存活以外，还需以服务器最新快照为准——
+                    # local_tank.alive 可能滞后于服务器已判定的死亡，避免"幽灵预测"继续移动。
+                    server_alive = True
+                    snapshot_tanks = curr_snapshot[1] if curr_snapshot else []
+                    for t in snapshot_tanks:
+                        if t.id == player_id:
+                            server_alive = t.alive
+                            break
+                    if (local_tank and local_tank.alive and server_alive
+                            and curr_snapshot and curr_snapshot[4]['phase'] == PHASE_PLAYING):
                         local_tank.dir = move_key
                         dx, dy = DIR_DELTA[move_key]
                         nx, ny = local_tank.x + dx, local_tank.y + dy
-                        from game import can_place_tank
-                        remote_tanks = [t for t in (curr_snapshot[1] if curr_snapshot else []) if t.id != player_id]
+                        remote_tanks = [t for t in snapshot_tanks if t.id != player_id]
                         if can_place_tank(grid, local_tank, nx, ny, remote_tanks):
                             local_tank.x, local_tank.y = nx, ny
 

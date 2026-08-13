@@ -9,12 +9,10 @@
 import socket
 import threading
 import time
-import sys
 
 from protocol import (
-    MSG_JOIN, MSG_JOIN_ACK, MSG_INPUT, MSG_STATE, MSG_LEAVE, MSG_PING,
+    MSG_JOIN, MSG_INPUT, MSG_LEAVE, MSG_PING,
     decode, encode_join_ack, encode_state, encode_pong, PROTOCOL_VERSION,
-    KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT, KEY_FIRE,
 )
 from game import World
 
@@ -54,7 +52,7 @@ class GameServer:
         return self
 
     def stop(self):
-        if not self.running and self.sock.fileno() < 0:
+        if not self.running and getattr(self.sock, '_closed', True):
             return
         self.running = False
         try: self.sock.close()
@@ -117,122 +115,6 @@ class GameServer:
             if now >= next_tick:
                 self.tick(); next_tick = now + self.tick_dt
             time.sleep(0.001)
-
-
-def legacy_main():
-    world = World(MAX_CLIENTS)
-    # client_id -> (addr, nickname)
-    clients = {}
-    # tank_id -> list[(key, is_down)]  本 tick 累积输入
-    pending_inputs = {0: [], 1: []}
-    lock = threading.Lock()
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(('0.0.0.0', SERVER_PORT))
-    sock.setblocking(False)
-    print('[server] 监听 0.0.0.0:%d' % SERVER_PORT)
-    print('[server] 等待 %d 个客户端连接...' % MAX_CLIENTS)
-
-    running = True
-
-    # ---- 接收线程 ----
-    def recv_loop():
-        while running:
-            try:
-                data, addr = sock.recvfrom(2048)
-            except BlockingIOError:
-                time.sleep(0.001)
-                continue
-            except OSError:
-                break
-            msg = decode(data)
-            if msg is None:
-                continue
-            mtype, payload = msg
-            with lock:
-                if mtype == MSG_JOIN:
-                    if payload.get('version') != PROTOCOL_VERSION:
-                        continue
-                    if len(clients) >= MAX_CLIENTS:
-                        continue  # 满员，丢弃
-                    # 已连接的地址不重复分配
-                    if addr in [c[0] for c in clients.values()]:
-                        continue
-                    tid = len(clients)
-                    clients[tid] = (addr, payload.get('version', 1))
-                    pending_inputs[tid] = []
-                    ack = encode_join_ack(tid)
-                    try:
-                        sock.sendto(ack, addr)
-                    except OSError:
-                        pass
-                    print('[server] 客户端 %d 加入 %s (坦克总数 %d)' % (tid, addr, len(clients)))
-                    if len(clients) == MAX_CLIENTS:
-                        print('[server] 双方就绪，开始对战')
-                elif mtype == MSG_INPUT:
-                    # 找到 addr 对应的 tank_id
-                    tid = _addr_to_tid(addr)
-                    if tid is None:
-                        continue
-                    pending_inputs[tid].append((payload['key'], payload['is_down']))
-                elif mtype == MSG_LEAVE:
-                    tid = _addr_to_tid(addr)
-                    if tid is not None:
-                        print('[server] 客户端 %d 离开' % tid)
-                        # 不立刻移除地址，避免重连 id 漂移；只让坦克死亡
-                        if tid < len(world.tanks):
-                            world.tanks[tid].alive = False
-                elif mtype == MSG_PING:
-                    try:
-                        sock.sendto(encode_pong(payload['timestamp_ns']), addr)
-                    except OSError:
-                        pass
-
-    def _addr_to_tid(addr):
-        for tid, (a, _) in clients.items():
-            if a == addr:
-                return tid
-        return None
-
-    t = threading.Thread(target=recv_loop, daemon=True)
-    t.start()
-
-    # ---- 主循环：30Hz 推进世界 ----
-    last = time.perf_counter()
-    try:
-        while running:
-            now = time.perf_counter()
-            if now - last < TICK_DT:
-                time.sleep(0.001)
-                continue
-            # 推进一个 tick（可能累积了多个 TICK_DT，但原型阶段简单跳过）
-            last = now
-            with lock:
-                # 取出本 tick 输入
-                inputs = {tid: list(pending_inputs[tid]) for tid in pending_inputs}
-                for tid in pending_inputs:
-                    pending_inputs[tid].clear()
-                # 等两名玩家都加入后才消耗倒计时，避免服务器空跑时开局。
-                if len(clients) == MAX_CLIENTS:
-                    world.step(inputs)
-
-                # 广播状态
-                snap = world.snapshot()
-                state = encode_state(snap['tick'], snap['tanks'], snap['bullets'], snap['grid'],
-                                     snap['items'], snap['phase'], snap['phase_ticks'], snap['winner'])
-                for tid, (addr, _) in clients.items():
-                    try:
-                        sock.sendto(state, addr)
-                    except OSError:
-                        pass
-
-    except KeyboardInterrupt:
-        print('\n[server] 收到 Ctrl+C，关闭')
-    finally:
-        running = False
-        sock.close()
-        t.join(timeout=1.0)
-        print('[server] 已关闭')
 
 
 def main():

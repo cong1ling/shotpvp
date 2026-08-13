@@ -50,6 +50,12 @@ ITEM_CHARS = {0: ('◆', C_GREEN), 1: ('✦', C_YELLOW), 2: ('⬢', C_CYAN)}
 ITEM_BORDER = ('▣', C_WHITE)
 
 
+# 渲染帧计数常量：每 N 帧强制全屏重绘一次，兜底差分渲染可能漏画的格子
+FORCE_FULL_REFRESH = 90
+# 单次 ANSI 输出分块大小（格数）：避免超长字符串在旧终端被截断
+WRITE_CHUNK = 200
+
+
 class Renderer:
     def __init__(self, width, height):
         self.w = width
@@ -58,6 +64,7 @@ class Renderer:
         # 每个元素: (char, color_code) 或 None(空)
         self._buf = [[None] * width for _ in range(height)]
         self._started = False
+        self._frames = 0
 
     def start(self):
         """初始化终端：清屏、隐藏光标。只在开始时调用一次。"""
@@ -83,7 +90,7 @@ class Renderer:
         for y in range(self.h):
             for x in range(self.w):
                 if grid[y][x] != 0:
-                    new_buf[y][x] = ('█', C_GRAY)
+                    new_buf[y][x] = ('█', '37')
 
         # 2. 道具是视觉 3x3 标记，但只填空地；实体会在后续覆盖它。
         for item in items:
@@ -137,13 +144,16 @@ class Renderer:
             self.start()
         new_buf = self.build_buffer(grid, tanks, bullets, local_id, items)
 
-        # 4. 差分输出：只画变化的格子
+        # 差分输出：只画变化的格子
         out = []
+        # 防御：若终端曾漏画首帧墙体（旧 conhost 对超长 ANSI/亮色码支持不稳），
+        # 差分永远不再补画。每 FORCE_FULL_REFRESH 帧强制全屏重建一次兜底。
+        force_full = self._frames % FORCE_FULL_REFRESH == 0
         for y in range(self.h):
             for x in range(self.w):
                 old = self._buf[y][x]
                 new = new_buf[y][x]
-                if old == new:
+                if not force_full and old == new:
                     continue
                 # 定位光标到 (y, x+1)（ANSI 行列从 1 开始）
                 out.append(ESC + '%d;%dH' % (y + 1, x + 1))
@@ -153,9 +163,12 @@ class Renderer:
                     ch, color = new
                     out.append(fg(color) + ch + reset())
         if out:
-            sys.stdout.write(''.join(out))
+            # 分块写入，避免单次超大字符串在部分终端/管道被截断
+            for i in range(0, len(out), WRITE_CHUNK):
+                sys.stdout.write(''.join(out[i:i + WRITE_CHUNK]))
             sys.stdout.flush()
         self._buf = new_buf
+        self._frames += 1
 
     def render_hud(self, local_tank, remote_tank, ping_ms, connection='在线', phase=1,
                    phase_ticks=0, winner=255):

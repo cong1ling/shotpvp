@@ -358,7 +358,12 @@ def main():
         print('应答码（可发回主机确认本次会话）：')
         print(encode_code(make_answer(offer, answer_candidates)))
         if endpoint is None:
-            parser.error('10 秒内未找到可用直连路径；请检查 Windows 防火墙、UPnP 与运营商 NAT，或使用 --connect IP:端口')
+            parser.error('10 秒内未找到可用直连路径。\n'
+                         '  可能原因：一方或双方处于对称 NAT / CGNAT（运营商共享出口），'
+                         'P2P 打洞无法穿透；Windows 防火墙拦 UDP；或运营商封禁 P2P。\n'
+                         '  建议：① 检查双方防火墙放行 python 的 UDP 出/入站；'
+                         '② 若仍有公网 IP，改用 --connect 公网IP:端口 直连；'
+                         '③ 最可靠：部署一台 VPS 中转，双方都 --connect VPS_IP:端口')
         keeper = Keepalive(sock, endpoint, offer.session_id, offer.secret).start()
         run_client(endpoint[0], endpoint[1], sock=sock, keepalive=keeper)
     elif args.connect:

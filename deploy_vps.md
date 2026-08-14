@@ -1,20 +1,31 @@
-# shotpvp VPS 中转部署指南（阿里云轻量 / Ubuntu）
+# shotpvp VPS 中转部署指南（阿里云轻量通用）
 
 在 VPS 上跑权威服务端，玩家双方都连 VPS，绕开双方 NAT 打洞问题。
 
 ## 一、需准备
 
-- 一台阿里云轻量服务器（Ubuntu 20.04+ / Debian 12+ 均可）
+- 一台阿里云轻量服务器（Ubuntu/Debian/CentOS/Alibaba Cloud Linux 均可）
 - 服务器公网 IP（控制台可见）
 - 能通过 SSH 登录（root 或 sudo 用户）
+- 本指南的安装命令会自动识别 Ubuntu（apt）与 CentOS/Aliyun（yum/dnf）
 
 ## 二、服务器端：一键部署
 
 SSH 登录服务器后，粘贴执行（把 `YOUR_PUBLIC_IP` 换成你的公网 IP，仅用于提示文案）：
 
 ```bash
-# 1. 安装 Python 3（Ubuntu 一般自带）
-sudo apt update && sudo apt install -y python3
+# 0. 识别系统（确认 apt 还是 yum/dnf）
+cat /etc/os-release
+
+# 1. 安装 Python 3 与 git（按系统自动选择包管理器）
+if command -v apt >/dev/null 2>&1; then
+  sudo apt update
+  sudo apt install -y python3 git
+elif command -v dnf >/dev/null 2>&1; then
+  sudo dnf install -y python3 git
+else
+  sudo yum install -y python3 git
+fi
 
 # 2. 拉取项目（只有 server.py 需要，但要带 protocol.py / game.py）
 cd ~
@@ -23,7 +34,7 @@ cd shotpvp
 python3 --version   # 确认 >= 3.8
 ```
 
-> 若服务器上没装 git：`sudo apt install -y git`
+> 已装 git / python3 时会自然跳过，无副作用。
 
 ## 三、服务器端：启动服务端
 

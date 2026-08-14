@@ -10,6 +10,26 @@ import sys
 from protocol import (DIR_DELTA, DIR_UP, DIR_DOWN, DIR_LEFT, DIR_RIGHT,
                       DIR_UP_LEFT, DIR_UP_RIGHT, DIR_DOWN_LEFT, DIR_DOWN_RIGHT)
 
+# ---- 终端 VT 支持（Windows 关键）----
+# 现代终端（Windows Terminal）默认解析 ANSI，但经典 conhost（PowerShell 5.1
+# 自带窗口、旧版 Windows 10 控制台）默认不处理 VT 转义序列，会把 \x1b[37m、
+# \x1b[H 这类控制码当普通文本直接打印——界面会变成大段乱码/阶梯状文字。
+# 必须在启动时用 SetConsoleMode 显式开启 ENABLE_VIRTUAL_TERMINAL_PROCESSING。
+def enable_vt():
+    """让 stdout 所在终端处理 ANSI 转义。非 Windows 或失败时静默跳过。"""
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+            handle = kernel32.GetStdHandle(-11)  # STD_OUTPUT_HANDLE
+            mode = ctypes.c_uint32()
+            if (kernel32.GetConsoleMode(handle, ctypes.byref(mode)) and
+                    not (mode.value & ENABLE_VIRTUAL_TERMINAL_PROCESSING)):
+                kernel32.SetConsoleMode(handle, mode.value | ENABLE_VIRTUAL_TERMINAL_PROCESSING)
+        except Exception:
+            pass
+
 # ANSI 转义
 ESC = '\x1b['
 HIDE_CURSOR = ESC + '?25l'
@@ -67,7 +87,8 @@ class Renderer:
         self._frames = 0
 
     def start(self):
-        """初始化终端：清屏、隐藏光标。只在开始时调用一次。"""
+        """初始化终端：开启 VT 处理、清屏、隐藏光标。只在开始时调用一次。"""
+        enable_vt()
         sys.stdout.write(HIDE_CURSOR + CLEAR_SCREEN + HOME)
         sys.stdout.flush()
         self._started = True

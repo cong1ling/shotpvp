@@ -52,6 +52,9 @@ C_CYAN = '38;2;60;180;220'           # 护盾/三连发：青色
 C_WHITE = '38;2;240;240;235'         # 亮白
 C_GRAY = '38;2;120;100;80'           # 不可破坏墙体：灰褐
 C_SAND = '38;2;190;160;110'          # 可破坏砖墙：暖沙色
+C_SHADOW = '38;2;30;20;10'            # 墙体阴影：深褐
+C_GROUND = '38;2;35;30;25'            # 背景纹理：极暗棕
+C_EXPLOSION = '38;2;255;140;30'       # 爆炸粒子：橙红
 
 # 坦克方向到字符
 TANK_CHAR = {
@@ -84,6 +87,7 @@ class Renderer:
         self._buf = [[None] * width for _ in range(height)]
         self._started = False
         self._frames = 0
+        self._particles = []  # [(x, y, tick, max_tick)]
 
     def start(self):
         """初始化终端：开启 VT 处理、清屏、隐藏光标。只在开始时调用一次。"""
@@ -160,12 +164,66 @@ class Renderer:
             if b.x < 0 or b.x >= self.w or b.y < 0 or b.y >= self.h:
                 continue
             new_buf[b.y][b.x] = (BULLET_CHAR, C_YELLOW)
+
+        # 5. 墙体阴影：砖墙下方空地画深色投影，增强立体感
+        for y in range(self.h):
+            for x in range(self.w):
+                if grid[y][x] == 1:  # 砖墙
+                    sx, sy = x, y + 1
+                    if 0 <= sx < self.w and 0 <= sy < self.h and new_buf[sy][sx] is None:
+                        new_buf[sy][sx] = ('░', C_SHADOW)
+
+        # 6. 背景纹理：剩余空地铺极暗点，消除纯黑"空洞感"
+        for y in range(self.h):
+            for x in range(self.w):
+                if new_buf[y][x] is None:
+                    new_buf[y][x] = ('·', C_GROUND)
+
         return new_buf
+
+    def spawn_explosion(self, x, y):
+        """在指定位置生成 3×3 爆炸粒子（扩散动画）。"""
+        import random
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                px, py = x + dx, y + dy
+                if 0 <= px < self.w and 0 <= py < self.h:
+                    life = random.randint(3, 6)
+                    self._particles.append((px, py, 0, life))
+
+    def _advance_particles(self, buf):
+        """推进粒子生命周期并覆盖到 buffer。"""
+        surviving = []
+        for (px, py, tick, life) in self._particles:
+            tick += 1
+            if tick >= life:
+                continue
+            surviving.append((px, py, tick, life))
+            # 粒子字符：█(火) → ▓(爆) → ▒(烟) → ░(弥散)
+            phase = tick / life
+            if phase < 0.25:
+                ch = '█'
+            elif phase < 0.5:
+                ch = '▓'
+            elif phase < 0.75:
+                ch = '▒'
+            else:
+                ch = '░'
+            # 颜色：橙红 → 暗灰
+            r = int(255 - 200 * phase)
+            g = int(140 - 100 * phase)
+            b = int(30 + 50 * phase)
+            color = '38;2;%d;%d;%d' % (r, g, b)
+            buf[py][px] = (ch, color)
+        self._particles = surviving
 
     def render(self, grid, tanks, bullets, local_id, items=()):
         if not self._started:
             self.start()
         new_buf = self.build_buffer(grid, tanks, bullets, local_id, items)
+
+        # 爆炸粒子（在实体之上叠加，确保视觉可见）
+        self._advance_particles(new_buf)
 
         # 差分输出：只画变化的格子
         out = []

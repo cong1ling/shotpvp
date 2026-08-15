@@ -179,6 +179,7 @@ def run_client(server_host=SERVER_HOST, server_port=SERVER_PORT, embedded_server
     held_directions = set()  # WASD only; arrows deliberately remain cardinal.
     held_arrows = set()
     arrow_order = []
+    _known_alive = set()  # 上帧存活的坦克 id，用于检测死亡事件触发爆炸
 
     try:
         while running:
@@ -276,6 +277,12 @@ def run_client(server_host=SERVER_HOST, server_port=SERVER_PORT, embedded_server
                         if tank.id != player_id and old and old.alive and tank.alive:
                             tank.x = round(old.x + (tank.x - old.x) * alpha)
                             tank.y = round(old.y + (tank.y - old.y) * alpha)
+
+                # 死亡检测：对比本帧与上帧存活状态，触发爆炸
+                for t in display_tanks:
+                    if t.id in _known_alive and not t.alive:
+                        renderer.spawn_explosion(t.x, t.y)
+                _known_alive = {t.id for t in display_tanks if t.alive}
 
                 renderer.render(grid, display_tanks, bullets, player_id, items)
 

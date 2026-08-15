@@ -315,6 +315,24 @@ def test_bullet_hit_wall():
     print('  test_bullet_hit_wall OK')
 
 
+def test_random_map_properties():
+    """随机对称地图：左右镜像、出生区开阔、同种子可复现、异种子不同。"""
+    import random
+    from game import generate_map, SPAWN_POINTS
+    for seed in (1, 2, 3, 42):
+        gm = generate_map(random.Random(seed))
+        for y in range(MAP_H):
+            for x in range(MAP_W):
+                assert gm[y][x] == gm[y][MAP_W - 1 - x], f"seed={seed} 左右不对称 at ({y},{x})"
+        for (sx, sy, _) in SPAWN_POINTS:
+            for dy in range(-1, 2):
+                for dx in range(-1, 2):
+                    assert gm[sy + dy][sx + dx] == 0, f"seed={seed} 出生区被占 ({sx+dx},{sy+dy})"
+    assert generate_map(random.Random(42)) == generate_map(random.Random(42))
+    assert generate_map(random.Random(42)) != generate_map(random.Random(43))
+    print('  test_random_map_properties OK')
+
+
 if __name__ == '__main__':
     print('运行游戏逻辑自测...')
     test_basic_move()
@@ -338,4 +356,5 @@ if __name__ == '__main__':
     test_world_countdown_powerups_win_and_restart()
     test_shrink_recovery_defers_when_blocked()
     test_respawn_requires_full_footprint()
+    test_random_map_properties()
     print('全部通过')

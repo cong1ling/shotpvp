@@ -59,7 +59,7 @@ _MAP_TEMPLATE = [
 
 
 def build_map():
-    """返回二维列表 grid[y][x]，值为格子类型。"""
+    """返回二维列表 grid[y][x]，值为格子类型。（固定双人模板，测试与预测依赖）"""
     grid = [[TILE_EMPTY] * MAP_W for _ in range(MAP_H)]
     for x in range(MAP_W):
         grid[0][x] = grid[MAP_H - 1][x] = TILE_STEEL
@@ -69,6 +69,48 @@ def build_map():
     for y in (6, 7, 14, 15, 22, 23):
         for x in (12, 13, 24, 25):
             grid[y][x] = grid[y][MAP_W - 1 - x] = TILE_BRICK
+    return grid
+
+
+# 候选掩体锚点（2×2 砖墙块）：每局从左半场抽样存活。
+# (y, x) 为左上角；右半场自动镜像，保证左右对称公平。
+# 出生区（y<=4 或 y>=26 且靠边）刻意没有锚点，保持开阔。
+_MASK_ANCHORS = [
+    (6, 4), (6, 12), (6, 20), (7, 8), (7, 16),
+    (10, 4), (10, 12), (10, 20), (11, 8), (11, 16),
+    (14, 4), (14, 12), (14, 20), (15, 8), (15, 16),
+    (18, 4), (18, 12), (18, 20), (19, 8), (19, 16),
+    (22, 4), (22, 12), (22, 20), (23, 8), (23, 16),
+]
+
+
+def generate_map(rng=None):
+    """生成随机对称竞技场。
+
+    上下左右边界为钢墙；左半场按锚点随机放置 2×2 砖墙块，
+    右半场镜像复制，保证双方出生区对称公平。
+    每局从锚点中抽样约 60%，避免每次地图完全相同，也避免墙太密。
+    """
+    rng = rng or random.Random()
+    grid = [[TILE_EMPTY] * MAP_W for _ in range(MAP_H)]
+    for x in range(MAP_W):
+        grid[0][x] = grid[MAP_H - 1][x] = TILE_STEEL
+    for y in range(MAP_H):
+        grid[y][0] = grid[y][MAP_W - 1] = TILE_STEEL
+    # 左半场（x 从 2 到 MAP_W//2 - 4，预留镜像空间），抽样锚点
+    half = MAP_W // 2
+    for (ay, ax) in _MASK_ANCHORS:
+        if ax < 2 or ax + 1 >= half - 2:
+            continue  # 太靠中线的锚点跳过，避免左右镜像重叠
+        if rng.random() < 0.6:
+            for dy in range(2):
+                for dx in range(2):
+                    grid[ay + dy][ax + dx] = TILE_BRICK
+    # 镜像到右半场：左半场 (y, x) -> 右半场 (y, MAP_W-1-x)
+    for y in range(1, MAP_H - 1):
+        for x in range(2, half - 2):
+            if grid[y][x] == TILE_BRICK:
+                grid[y][MAP_W - 1 - x] = TILE_BRICK
     return grid
 
 
@@ -308,7 +350,7 @@ class World:
         self.reset_round()
 
     def reset_round(self):
-        self.grid = build_map()
+        self.grid = generate_map(self.rng)
         self.tanks = [spawn_tank(i) for i in range(self.player_count)]
         self.bullets = []
         self.items = []

@@ -38,21 +38,20 @@ CLEAR_SCREEN = ESC + '2J'
 HOME = ESC + 'H'
 
 # 颜色（前景/背景）
-def fg(color): return ESC + color + 'm'
+def fg(color): return ESC + color + ';1m'
 def reset(): return ESC + '0m'
 
-# 前景色码
-C_DEFAULT = '39'
-C_RED = '31'
-C_GREEN = '32'
-C_YELLOW = '33'
-C_BLUE = '34'
-C_CYAN = '36'
-C_WHITE = '97'
-C_GRAY = '90'
-
-# 背景色码（仅用于墙，让墙有质感）
-BG_DARK = '48;5;238'
+# 真彩色（24-bit）配色板 —— 坦克大战主题
+# 格式: 38;2;R;G;B   (前景)  /  48;2;R;G;B  (背景)
+C_DEFAULT = '38;2;200;200;200'       # 默认文字：浅灰
+C_RED = '38;2;220;60;60'             # 敌方坦克：暖红
+C_GREEN = '38;2;80;200;80'           # 缩小道具：绿色
+C_YELLOW = '38;2;255;200;40'         # 子弹：金黄
+C_BLUE = '38;2;60;140;220'           # 我方坦克：蓝白
+C_CYAN = '38;2;60;180;220'           # 护盾/三连发：青色
+C_WHITE = '38;2;240;240;235'         # 亮白
+C_GRAY = '38;2;120;100;80'           # 不可破坏墙体：灰褐
+C_SAND = '38;2;190;160;110'          # 可破坏砖墙：暖沙色
 
 # 坦克方向到字符
 TANK_CHAR = {
@@ -107,11 +106,14 @@ class Renderer:
         """
         new_buf = [[None] * self.w for _ in range(self.h)]
 
-        # 1. 地图（墙）
+        # 1. 地图（墙）—— 砖墙=暖沙色▓，钢墙=灰褐█
         for y in range(self.h):
             for x in range(self.w):
-                if grid[y][x] != 0:
-                    new_buf[y][x] = ('█', '37')
+                t = grid[y][x]
+                if t == 1:
+                    new_buf[y][x] = ('▓', C_SAND)
+                elif t == 2:
+                    new_buf[y][x] = ('█', C_GRAY)
 
         # 2. 道具是视觉 3x3 标记，但只填空地；实体会在后续覆盖它。
         for item in items:
@@ -193,9 +195,7 @@ class Renderer:
 
     def render_hud(self, local_tank, remote_tank, ping_ms, connection='在线', phase=1,
                    phase_ticks=0, winner=255):
-        """在画面底部画一行 HUD：分数、是否轮到操作、ping。
-
-        简单实现：定位到最后一行下面一行。"""
+        """在画面底部画三行面板 HUD：上边框 / 内容 / 下边框。"""
         if phase == 0:
             status = '倒计时 %.1fs' % (phase_ticks / 30)
         elif phase == 2:
@@ -206,14 +206,23 @@ class Renderer:
             if local_tank.shield: effects.append('护盾')
             if local_tank.triple_shot: effects.append('三连发')
             status = '/'.join(effects) or '战斗中'
-        line = '你 %d : %d 对手 | %s | RTT %dms | %s' % (
+        line = '你 %d : %d 对手 │ %s │ RTT %dms │ %s' % (
             local_tank.score, remote_tank.score, status, ping_ms, connection,
         )
-        out = [ESC + '%d;1H' % (self.h + 2), reset()]
-        # 清掉该行旧内容
-        out.append(' ' * self.w)
+        # 内宽 = 地图宽度 - 2（左右边框各占一列）
+        inner_w = self.w - 2
+        # 如果内容太长，截断
+        content = line[:inner_w]
+        content = content + ' ' * (inner_w - len(content))
+        top = '┌' + '─' * inner_w + '┐'
+        mid = '│' + content + '│'
+        bot = '└' + '─' * inner_w + '┘'
+        out = [ESC + '%d;1H' % (self.h + 1), reset()]
+        out.append(top)
         out.append(ESC + '%d;1H' % (self.h + 2))
-        out.append(line[:self.w])
+        out.append(mid)
+        out.append(ESC + '%d;1H' % (self.h + 3))
+        out.append(bot)
         sys.stdout.write(''.join(out))
         sys.stdout.flush()
 
